@@ -156,10 +156,10 @@ func dial(ctx context.Context, netDialer *net.Dialer, network, addr string, conf
 	}
 
 	conn := Conn{conn: rawConn, config: config, isClient: true}
-	if err := conn.HandshakeContext(ctx); err != nil {
-		rawConn.Close()
-		return nil, err
-	}
+	// if err := conn.HandshakeContext(ctx); err != nil {
+	// 	rawConn.Close()
+	// 	return nil, err
+	// }
 	handshakeState := PubClientHandshakeState{C: &conn, Hello: &PubClientHelloMsg{}}
 	uconn := UConn{Conn: &conn, ClientHelloID: clientHelloID, HandshakeState: handshakeState}
 	uconn.HandshakeState.uconn = &uconn
