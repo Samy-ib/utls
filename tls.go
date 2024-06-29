@@ -115,11 +115,11 @@ func (timeoutError) Temporary() bool { return true }
 //
 // DialWithDialer uses context.Background internally; to specify the context,
 // use [Dialer.DialContext] with NetDialer set to the desired dialer.
-func DialWithDialer(dialer *net.Dialer, network, addr string, config *Config) (*Conn, error) {
-	return dial(context.Background(), dialer, network, addr, config)
+func DialWithDialer(dialer *net.Dialer, network, addr string, config *Config, clientHelloID ClientHelloID) (*UConn, error) {
+	return dial(context.Background(), dialer, network, addr, config, clientHelloID)
 }
 
-func dial(ctx context.Context, netDialer *net.Dialer, network, addr string, config *Config) (*Conn, error) {
+func dial(ctx context.Context, netDialer *net.Dialer, network, addr string, config *Config, clientHelloID ClientHelloID) (*UConn, error) {
 	if netDialer.Timeout != 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, netDialer.Timeout)
@@ -160,7 +160,14 @@ func dial(ctx context.Context, netDialer *net.Dialer, network, addr string, conf
 		rawConn.Close()
 		return nil, err
 	}
-	return conn, nil
+	handshakeState := PubClientHandshakeState{C: conn, Hello: &PubClientHelloMsg{}}
+	uconn := UConn{Conn: conn, ClientHelloID: clientHelloID, HandshakeState: handshakeState}
+	uconn.HandshakeState.uconn = &uconn
+	uconn.handshakeFn = uconn.clientHandshake
+	uconn.sessionController = newSessionController(&uconn)
+	uconn.utls.sessionController = uconn.sessionController
+	uconn.skipResumptionOnNilExtension = config.PreferSkipResumptionOnNilExtension || clientHelloID.Client != helloCustom
+	return &uconn, nil
 }
 
 // Dial connects to the given network address using net.Dial
@@ -169,8 +176,8 @@ func dial(ctx context.Context, netDialer *net.Dialer, network, addr string, conf
 // Dial interprets a nil configuration as equivalent to
 // the zero configuration; see the documentation of Config
 // for the defaults.
-func Dial(network, addr string, config *Config) (*Conn, error) {
-	return DialWithDialer(new(net.Dialer), network, addr, config)
+func Dial(network, addr string, config *Config, clientHelloID ClientHelloID) (*UConn, error) {
+	return DialWithDialer(new(net.Dialer), network, addr, config, clientHelloID)
 }
 
 // Dialer dials TLS connections given a configuration and a Dialer for the
@@ -195,8 +202,8 @@ type Dialer struct {
 //
 // Dial uses context.Background internally; to specify the context,
 // use [Dialer.DialContext].
-func (d *Dialer) Dial(network, addr string) (net.Conn, error) {
-	return d.DialContext(context.Background(), network, addr)
+func (d *Dialer) Dial(network, addr string, clientHelloID ClientHelloID) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, addr, clientHelloID)
 }
 
 func (d *Dialer) netDialer() *net.Dialer {
@@ -215,8 +222,8 @@ func (d *Dialer) netDialer() *net.Dialer {
 // connection.
 //
 // The returned [Conn], if any, will always be of type *[Conn].
-func (d *Dialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	c, err := dial(ctx, d.netDialer(), network, addr, d.Config)
+func (d *Dialer) DialContext(ctx context.Context, network, addr string, clientHelloID ClientHelloID) (net.Conn, error) {
+	c, err := dial(ctx, d.netDialer(), network, addr, d.Config, clientHelloID)
 	if err != nil {
 		// Don't return c (a typed nil) in an interface.
 		return nil, err
